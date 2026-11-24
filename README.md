@@ -140,9 +140,76 @@ For a graph, Grafana's Node Graph panel takes one query for nodes and one for ed
 | A meshed workload shows no outbound traffic | Its traffic uses ports excluded from Istio redirection (see limits in the spec) |
 | Edges point at Service names | Dataplane V2 leaves the Service IP on the socket (see limits in the spec) |
 
+## How it works
+
+The short version: the kernel already counts bytes, retransmits and round-trip time for every TCP socket. netflow reads those counters at the right moments instead of counting packets itself.
+
+```
+kernel                                   agent (one pod per node)
+------                                   ------------------------
+TCP state change  ── tracepoint ──────►  open / close / failed events
+                                                    │
+per-socket state (socket storage)                   ▼
+        ▲                                 IP → workload (Kubernetes API)
+        │ every 15 s                                │
+iterator over open sockets ───────────►             ▼
+                                          Prometheus metrics on /metrics
+```
+
+### In the kernel
+
+- **One tracepoint, `inet_sock_set_state`.** It fires when a TCP socket changes state. The agent acts on three transitions: established (remember the socket), closed (report the final numbers), and closed straight from connecting (a failed connect). All other transitions return immediately.
+- **State stored on the socket.** The few values kept per connection (start time, role, last reported counters) live in socket-local storage. The kernel frees it together with the socket, so there is no table to size and nothing to evict.
+- **A periodic pass over open sockets.** Every interval the agent runs an eBPF iterator that visits each tracked socket, reads its counters and emits the change since the last visit.
+- **Deltas are computed in the kernel.** Every record says "this much since last time", so the agent only adds numbers up and keeps no per-connection state of its own.
+
+### In the agent
+
+- **IP to workload.** The agent watches pods and Services through the Kubernetes API and resolves each address to a namespace and workload name, using the same naming rule as Istio.
+- **One socket per connection is counted.** Each connection has two ends, and a sidecar adds two more legs inside the pod. The rules for which one counts are in the [spec](docs/SPEC.md#counting-rules).
+- **Aggregation into metrics.** Records are summed per edge and exposed for scraping.
+
+### Why it is built this way
+
+| Choice | Reason |
+|---|---|
+| Socket layer instead of packet layer | Cost depends on the number of connections, not on throughput. It also stays clear of the tc and XDP hooks, which Dataplane V2's Cilium owns. |
+| Read the kernel's counters instead of counting | The TCP stack maintains `bytes_sent`, `bytes_received`, `total_retrans` and `srtt_us` anyway. They are exact, and reading them is nearly free. |
+| Tracepoint instead of kprobes | Tracepoints are a stable kernel interface and the cheapest hook type. Kprobes attach to internal functions that can change between kernel versions. |
+| Sample open sockets instead of reporting only at close | Envoy pools connections and keeps them open for hours. Close-only reporting would hide most mesh traffic. |
+| CO-RE (compile once, run everywhere) | The probe is compiled once at build time, and field offsets are fixed up when it loads. One image works across node kernel versions, and GKE upgrades don't require a rebuild. |
+| Attribute by IP instead of by process | Pod IPs are unique in the cluster, so the agent needs neither host PID access nor cgroup parsing, and can run with two capabilities instead of privileged mode. |
+| User ID 1337 to recognise Envoy | In a sidecar pod, the app's connection is redirected to Envoy, which opens the real one. Both look like outbound connections from the same pod IP; Istio's fixed proxy user ID tells them apart. |
+| Metrics instead of flow logs | Consumers get a standard query API, and storage grows with the number of edges, not the number of connections. |
+
+The approach follows Netflix's Flow Exporter (TCP tracepoints, central attribution by IP) and DoorDash's BPFAgent (Go with `cilium/ebpf`, CO-RE, ring buffer), adapted for a cluster that already runs Cilium and Istio.
+
 ## Overhead
 
-There are no hooks on the packet path: one tracepoint fires on TCP state changes, and one pass over the open sockets runs per interval. To measure on a node:
+Cost depends on the connection rate and the number of open sockets. Throughput does not matter, because nothing is hooked on the packet path.
+
+### Measured
+
+Measured on 2026-11-24 in a Linux VM on an Apple Silicon laptop (kernel 7.2), not on a GKE node, so read these as an order of magnitude. The load was 3,000 short HTTP connections in 37 seconds plus 300 connections held open.
+
+| Part | Measured | Meaning |
+|---|---|---|
+| Tracepoint | 1.1 µs per call, about 11 calls per connection | About 13 µs of kernel time per connection, both ends included |
+| Pass over open sockets | 0.75 µs per open socket | Once per interval |
+| Agent process | 0.15 s of CPU over the run | About 0.3% of one core |
+| Agent memory | 15 MiB | Without the Kubernetes cache |
+
+### What that means for a node
+
+- 1,000 new connections per second cost roughly 0.7% of one core in the tracepoint.
+- 10,000 open connections sampled every 15 seconds cost about 7.5 ms per pass, or 0.05% of one core.
+- Memory on a cluster also includes the cache of all pods and Services. This has not been measured; pods are trimmed to a few fields, and the manifest sets a 300 MiB limit.
+
+Very high connection churn (a new connection per request, without pooling) raises CPU linearly. Many distinct edges and ports raise the series count in the metrics store more than the cost on the node.
+
+### Measure it yourself
+
+On a node:
 
 ```bash
 sysctl kernel.bpf_stats_enabled=1
