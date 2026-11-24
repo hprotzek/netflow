@@ -128,7 +128,24 @@ unless on (source_workload, destination_workload)
 sum by (source_workload, destination_workload) (rate(istio_tcp_sent_bytes_total[5m]) or rate(istio_requests_total[5m]))
 ```
 
-For a graph, Grafana's Node Graph panel takes one query for nodes and one for edges; the first query above is the edge list.
+## Dashboard
+
+[dashboards/netflow-mesh.json](dashboards/netflow-mesh.json) is an example Grafana dashboard. Import it under Dashboards → New → Import and pick your Prometheus-compatible data source (Mimir works).
+
+![Service graph with sample data](docs/dashboard.jpg)
+
+| Panel | Shows |
+|---|---|
+| Service graph | Workloads as nodes, connections as edges, with throughput in kB/s in both directions |
+| Edges | One row per edge: bytes each way, open and new connections, failed connects, retransmits, RTT p99, and Istio's request rate and 5xx share |
+| Throughput, Retransmits, RTT p99 | The ten busiest edges over time |
+
+The Namespace filter keeps an edge when either end is in a selected namespace.
+
+The dashboard was tested on Grafana 13 with generated sample series, not with data from a real cluster. Two things to know:
+
+- The Node Graph panel ignores units, so the graph query divides by 1000 to show kB/s.
+- The Istio columns assume Istio's standard `istio_requests_total` metric with `reporter="source"` in the same data source. They stay empty for edges outside the mesh.
 
 ## Troubleshooting
 

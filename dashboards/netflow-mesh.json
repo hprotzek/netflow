@@ -1,0 +1,475 @@
+{
+  "title": "netflow service mesh",
+  "uid": "netflow-mesh",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": [
+    "netflow",
+    "ebpf"
+  ],
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Data source",
+        "type": "datasource",
+        "query": "prometheus"
+      },
+      {
+        "name": "namespace",
+        "label": "Namespace",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(netflow_tcp_sent_bytes_total, source_workload_namespace)",
+          "refId": "ns"
+        },
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "nodeGraph",
+      "title": "Service graph (kB/s, both directions)",
+      "description": "Nodes are workloads, edges are TCP connections seen by netflow. The number is throughput in both directions.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 16,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "nodes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (id, title, subtitle) (label_replace(label_replace(label_join(((sum by (source_workload_namespace, source_workload, destination_workload_namespace, destination_workload) (rate(netflow_tcp_sent_bytes_total{source_workload_namespace=~\"$namespace\"}[$__rate_interval]) or rate(netflow_tcp_sent_bytes_total{destination_workload_namespace=~\"$namespace\"}[$__rate_interval])) + sum by (source_workload_namespace, source_workload, destination_workload_namespace, destination_workload) (rate(netflow_tcp_received_bytes_total{source_workload_namespace=~\"$namespace\"}[$__rate_interval]) or rate(netflow_tcp_received_bytes_total{destination_workload_namespace=~\"$namespace\"}[$__rate_interval]))) / 1000), \"id\", \"/\", \"source_workload_namespace\", \"source_workload\"), \"title\", \"$1\", \"source_workload\", \"(.*)\"), \"subtitle\", \"$1\", \"source_workload_namespace\", \"(.*)\") or label_replace(label_replace(label_join(((sum by (source_workload_namespace, source_workload, destination_workload_namespace, destination_workload) (rate(netflow_tcp_sent_bytes_total{source_workload_namespace=~\"$namespace\"}[$__rate_interval]) or rate(netflow_tcp_sent_bytes_total{destination_workload_namespace=~\"$namespace\"}[$__rate_interval])) + sum by (source_workload_namespace, source_workload, destination_workload_namespace, destination_workload) (rate(netflow_tcp_received_bytes_total{source_workload_namespace=~\"$namespace\"}[$__rate_interval]) or rate(netflow_tcp_received_bytes_total{destination_workload_namespace=~\"$namespace\"}[$__rate_interval]))) / 1000), \"id\", \"/\", \"destination_workload_namespace\", \"destination_workload\"), \"title\", \"$1\", \"destination_workload\", \"(.*)\"), \"subtitle\", \"$1\", \"destination_workload_namespace\", \"(.*)\"))",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "edges",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "label_join(label_join(label_join(((sum by (source_workload_namespace, source_workload, destination_workload_namespace, destination_workload) (rate(netflow_tcp_sent_bytes_total{source_workload_namespace=~\"$namespace\"}[$__rate_interval]) or rate(netflow_tcp_sent_bytes_total{destination_workload_namespace=~\"$namespace\"}[$__rate_interval])) + sum by (source_workload_namespace, source_workload, destination_workload_namespace, destination_workload) (rate(netflow_tcp_received_bytes_total{source_workload_namespace=~\"$namespace\"}[$__rate_interval]) or rate(netflow_tcp_received_bytes_total{destination_workload_namespace=~\"$namespace\"}[$__rate_interval]))) / 1000), \"source\", \"/\", \"source_workload_namespace\", \"source_workload\"), \"target\", \"/\", \"destination_workload_namespace\", \"destination_workload\"), \"id\", \" > \", \"source\", \"target\")",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "^Value.*",
+            "renamePattern": "mainstat"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "id": 1
+    },
+    {
+      "type": "table",
+      "title": "Edges",
+      "description": "One row per edge. The Istio columns are filled for meshed edges only.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (source_workload_namespace, source_workload, destination_workload_namespace, destination_workload) (rate(netflow_tcp_sent_bytes_total{source_workload_namespace=~\"$namespace\"}[$__rate_interval]) or rate(netflow_tcp_sent_bytes_total{destination_workload_namespace=~\"$namespace\"}[$__rate_interval]))",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (source_workload_namespace, source_workload, destination_workload_namespace, destination_workload) (rate(netflow_tcp_received_bytes_total{source_workload_namespace=~\"$namespace\"}[$__rate_interval]) or rate(netflow_tcp_received_bytes_total{destination_workload_namespace=~\"$namespace\"}[$__rate_interval]))",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (source_workload_namespace, source_workload, destination_workload_namespace, destination_workload) (netflow_tcp_connections_open{source_workload_namespace=~\"$namespace\"} or netflow_tcp_connections_open{destination_workload_namespace=~\"$namespace\"})",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (source_workload_namespace, source_workload, destination_workload_namespace, destination_workload) (rate(netflow_tcp_connections_opened_total{source_workload_namespace=~\"$namespace\"}[$__rate_interval]) or rate(netflow_tcp_connections_opened_total{destination_workload_namespace=~\"$namespace\"}[$__rate_interval]))",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (source_workload_namespace, source_workload, destination_workload_namespace, destination_workload) (rate(netflow_tcp_connect_failures_total{source_workload_namespace=~\"$namespace\"}[$__rate_interval]) or rate(netflow_tcp_connect_failures_total{destination_workload_namespace=~\"$namespace\"}[$__rate_interval]))",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (source_workload_namespace, source_workload, destination_workload_namespace, destination_workload) (rate(netflow_tcp_retransmits_total{source_workload_namespace=~\"$namespace\"}[$__rate_interval]) or rate(netflow_tcp_retransmits_total{destination_workload_namespace=~\"$namespace\"}[$__rate_interval]))",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "G",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, source_workload_namespace, source_workload, destination_workload_namespace, destination_workload) (rate(netflow_tcp_rtt_seconds_bucket{source_workload_namespace=~\"$namespace\"}[$__rate_interval]) or rate(netflow_tcp_rtt_seconds_bucket{destination_workload_namespace=~\"$namespace\"}[$__rate_interval])))",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "H",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (source_workload_namespace, source_workload, destination_workload_namespace, destination_workload) (rate(istio_requests_total{reporter=\"source\", source_workload_namespace=~\"$namespace\"}[$__rate_interval]) or rate(istio_requests_total{reporter=\"source\", destination_workload_namespace=~\"$namespace\"}[$__rate_interval]))",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "I",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (source_workload_namespace, source_workload, destination_workload_namespace, destination_workload) (rate(istio_requests_total{reporter=\"source\", response_code=~\"5..\", source_workload_namespace=~\"$namespace\"}[$__rate_interval]) or rate(istio_requests_total{reporter=\"source\", response_code=~\"5..\", destination_workload_namespace=~\"$namespace\"}[$__rate_interval])) / sum by (source_workload_namespace, source_workload, destination_workload_namespace, destination_workload) (rate(istio_requests_total{reporter=\"source\", source_workload_namespace=~\"$namespace\"}[$__rate_interval]) or rate(istio_requests_total{reporter=\"source\", destination_workload_namespace=~\"$namespace\"}[$__rate_interval]))",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {
+              "source_workload_namespace": 0,
+              "source_workload": 1,
+              "destination_workload_namespace": 2,
+              "destination_workload": 3
+            },
+            "renameByName": {
+              "Value #A": "Sent",
+              "Value #B": "Received",
+              "Value #C": "Open connections",
+              "Value #D": "New connections",
+              "Value #E": "Failed connects",
+              "Value #F": "Retransmits",
+              "Value #G": "RTT p99",
+              "Value #H": "Istio requests",
+              "Value #I": "Istio 5xx",
+              "source_workload_namespace": "Source namespace",
+              "source_workload": "Source",
+              "destination_workload_namespace": "Destination namespace",
+              "destination_workload": "Destination"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Sent"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "Bps"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Received"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "Bps"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Open connections"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "New connections"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ops"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Failed connects"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ops"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Retransmits"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ops"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "RTT p99"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Istio requests"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "reqps"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Istio 5xx"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [
+          {
+            "displayName": "Sent",
+            "desc": true
+          }
+        ]
+      },
+      "id": 2
+    },
+    {
+      "type": "timeseries",
+      "title": "Throughput, top 10 edges",
+      "description": "Bytes per second in both directions.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 26
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "topk(10, (sum by (source_workload_namespace, source_workload, destination_workload_namespace, destination_workload) (rate(netflow_tcp_sent_bytes_total{source_workload_namespace=~\"$namespace\"}[$__rate_interval]) or rate(netflow_tcp_sent_bytes_total{destination_workload_namespace=~\"$namespace\"}[$__rate_interval])) + sum by (source_workload_namespace, source_workload, destination_workload_namespace, destination_workload) (rate(netflow_tcp_received_bytes_total{source_workload_namespace=~\"$namespace\"}[$__rate_interval]) or rate(netflow_tcp_received_bytes_total{destination_workload_namespace=~\"$namespace\"}[$__rate_interval]))))",
+          "legendFormat": "{{source_workload}} → {{destination_workload}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "id": 3
+    },
+    {
+      "type": "timeseries",
+      "title": "Retransmits, top 10 edges",
+      "description": "Retransmitted segments per second. Sustained values point at packet loss on that path.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 26
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "topk(10, sum by (source_workload_namespace, source_workload, destination_workload_namespace, destination_workload) (rate(netflow_tcp_retransmits_total{source_workload_namespace=~\"$namespace\"}[$__rate_interval]) or rate(netflow_tcp_retransmits_total{destination_workload_namespace=~\"$namespace\"}[$__rate_interval])))",
+          "legendFormat": "{{source_workload}} → {{destination_workload}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "id": 4
+    },
+    {
+      "type": "timeseries",
+      "title": "Round-trip time p99, top 10 edges",
+      "description": "Network round-trip time as the kernel measures it, without application time.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 26
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "topk(10, histogram_quantile(0.99, sum by (le, source_workload_namespace, source_workload, destination_workload_namespace, destination_workload) (rate(netflow_tcp_rtt_seconds_bucket{source_workload_namespace=~\"$namespace\"}[$__rate_interval]) or rate(netflow_tcp_rtt_seconds_bucket{destination_workload_namespace=~\"$namespace\"}[$__rate_interval]))))",
+          "legendFormat": "{{source_workload}} → {{destination_workload}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "id": 5
+    }
+  ]
+}
